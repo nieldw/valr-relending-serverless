@@ -1,0 +1,35 @@
+[build]
+  command = "npm run build"
+  functions = "dist/functions"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "18"
+
+[[functions]]
+  path = "dist/functions/manage-loans.js"
+  schedule = "0 */6 * * *"  # Run every 6 hours
+
+[functions."manage-loans"]
+  timeout = 300  # 5 minutes timeout
+  memory = 512   # 512MB memory
+
+# Development settings
+[dev]
+  command = "npm run dev"
+  functions = "dist/functions"
+  port = 8888
+
+# Environment variables for production (set these in Netlify dashboard)
+# VALR_API_KEY = "your-api-key"
+# VALR_API_SECRET = "your-api-secret"
+# DRY_RUN = "false"
+# ENABLED_CURRENCIES = "ZAR,BTC,ETH"
+# MIN_INCREMENT_AMOUNT = "{\"ZAR\": \"100\", \"BTC\": \"0.0001\", \"ETH\": \"0.001\"}"
+# MAX_LOAN_RATIO = "0.8"
+
+# Redirect rules (optional)
+[[redirects]]
+  from = "/api/manage-loans"
+  to = "/.netlify/functions/manage-loans"
+  status = 200
