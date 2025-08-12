@@ -1,6 +1,12 @@
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import * as crypto from 'crypto';
-import { API_TIMEOUT_MS, MAIN_ACCOUNT_ID } from '../constants/currency-defaults';
+import { 
+  API_TIMEOUT_MS, 
+  MAIN_ACCOUNT_ID, 
+  DEFAULT_RETRY_ATTEMPTS,
+  MIN_RETRY_DELAY_MS,
+  MAX_RETRY_DELAY_MS
+} from '../constants/currency-defaults';
 import {
   ValrCredentials,
   Subaccount,
@@ -76,30 +82,47 @@ export class ValrClient {
       });
       return response.data;
     } catch (error: any) {
-      // Log full error details internally for debugging
+      // Log sanitized error details without exposing sensitive data
       console.error('VALR API request failed:', {
         method,
         endpoint,
         status: error.response?.status,
-        data: error.response?.data,
-        message: error.message
+        hasResponseData: !!error.response?.data,
+        message: error.message,
+        timestamp: new Date().toISOString()
       });
 
-      if (error.response?.data) {
-        // Extract safe error information for client
-        const apiData = error.response.data;
+      if (error.response) {
         const statusCode = error.response.status;
+        const apiData = error.response.data;
         
-        // Only expose safe error codes and messages
-        if (apiData.code && typeof apiData.code === 'number') {
+        // Handle rate limiting first (can have empty data)
+        if (statusCode === 429) {
+          // Extract rate limit information from headers
+          const retryAfter = error.response.headers['retry-after'];
+          const rateLimitReset = error.response.headers['x-ratelimit-reset'];
+          const rateLimitRemaining = error.response.headers['x-ratelimit-remaining'];
+          
+          // Create detailed rate limit error with timing information
+          const rateLimitInfo = {
+            retryAfter: retryAfter ? parseInt(retryAfter) : null,
+            rateLimitReset: rateLimitReset ? parseInt(rateLimitReset) : null,
+            rateLimitRemaining: rateLimitRemaining ? parseInt(rateLimitRemaining) : null
+          };
+          
+          const error429 = new Error('VALR API Error: Rate limit exceeded');
+          (error429 as any).rateLimitInfo = rateLimitInfo;
+          throw error429;
+        }
+        
+        // Handle responses with data
+        if (apiData && apiData.code && typeof apiData.code === 'number') {
           throw new Error(`VALR API Error: {"code":${apiData.code},"message":"${apiData.message || 'Unknown error'}"}`);
         }
         
-        // Fallback for HTTP status codes
+        // Fallback for other HTTP status codes
         if (statusCode === 401 || statusCode === 403) {
           throw new Error('VALR API Error: Unauthorized access');
-        } else if (statusCode === 429) {
-          throw new Error('VALR API Error: Rate limit exceeded');
         } else if (statusCode >= 400 && statusCode < 500) {
           throw new Error('VALR API Error: Invalid request');
         } else {
@@ -112,17 +135,69 @@ export class ValrClient {
     }
   }
 
+  private async makeRequestWithRetry<T>(
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+    endpoint: string,
+    data?: any,
+    subaccountId?: string,
+    maxRetries: number = DEFAULT_RETRY_ATTEMPTS
+  ): Promise<T> {
+    let lastError: any;
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.makeRequest<T>(method, endpoint, data, subaccountId);
+      } catch (error: any) {
+        lastError = error;
+        
+        // Check if this is a rate limit error with retry information
+        if (error.message?.includes('Rate limit exceeded') && (error as any).rateLimitInfo && attempt < maxRetries) {
+          const rateLimitInfo = (error as any).rateLimitInfo;
+          
+          // Calculate optimal wait time based on response headers
+          let waitTimeMs = MIN_RETRY_DELAY_MS;
+          
+          if (rateLimitInfo.retryAfter) {
+            // Use Retry-After header (in seconds)
+            waitTimeMs = rateLimitInfo.retryAfter * 1000;
+          } else if (rateLimitInfo.rateLimitReset) {
+            // Calculate time until rate limit resets
+            const resetTime = rateLimitInfo.rateLimitReset * 1000; // Convert to milliseconds
+            const currentTime = Date.now();
+            waitTimeMs = Math.max(resetTime - currentTime, MIN_RETRY_DELAY_MS);
+          } else {
+            // Exponential backoff if no header information
+            waitTimeMs = Math.min(MIN_RETRY_DELAY_MS * Math.pow(2, attempt), MAX_RETRY_DELAY_MS);
+          }
+          
+          console.log(`Rate limited. Waiting ${waitTimeMs}ms before retry ${attempt + 1}/${maxRetries}`, {
+            endpoint,
+            waitTimeMs
+          });
+          
+          await new Promise(resolve => setTimeout(resolve, waitTimeMs));
+          continue;
+        }
+        
+        // For non-rate-limit errors, don't retry
+        break;
+      }
+    }
+    
+    throw lastError;
+  }
+
   async getSubaccounts(): Promise<Subaccount[]> {
-    return this.makeRequest<Subaccount[]>('GET', '/v1/account/subaccounts');
+    return this.makeRequestWithRetry<Subaccount[]>('GET', '/v1/account/subaccounts');
   }
 
   async getSubaccountBalances(subaccountId: string): Promise<SubaccountBalance[]> {
-    return this.makeRequest<SubaccountBalance[]>('GET', '/v1/account/balances', undefined, subaccountId);
+    return this.makeRequestWithRetry<SubaccountBalance[]>('GET', '/v1/account/balances', undefined, subaccountId);
   }
 
   async getOpenLoans(subaccountId: string, currency?: string): Promise<OpenLoan[]> {
     const params = currency ? `?currency=${currency}` : '';
-    return this.makeRequest<OpenLoan[]>('GET', `/v1/loans/open${params}`, undefined, subaccountId);
+    return this.makeRequestWithRetry<OpenLoan[]>('GET', `/v1/loans/open${params}`, undefined, subaccountId);
   }
 
   async updateLoan(
@@ -130,13 +205,13 @@ export class ValrClient {
     loanId: string,
     updateRequest: UpdateLoanRequest
   ): Promise<OpenLoan> {
-    return this.makeRequest<OpenLoan>('PUT', '/v1/loans/increase', {
+    return this.makeRequestWithRetry<OpenLoan>('PUT', '/v1/loans/increase', {
       loanId,
       ...updateRequest
     }, subaccountId);
   }
 
   async getCurrencies(): Promise<CurrencyInfo[]> {
-    return this.makeRequest<CurrencyInfo[]>('GET', '/v1/public/currencies');
+    return this.makeRequestWithRetry<CurrencyInfo[]>('GET', '/v1/public/currencies');
   }
 }

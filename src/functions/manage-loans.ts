@@ -362,10 +362,7 @@ async function executeSequentially(
       });
     }
 
-    // Small delay between executions to be gentle on the API
-    if (i < executionPlan.plannedIncreases.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
+    // No artificial delays - rely on intelligent retry logic in ValrClient
   }
 
   const successCount = executionResults.filter(r => r.success).length;

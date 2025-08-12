@@ -19,7 +19,9 @@ export const API_TIMEOUT_MS = 30000;
 /**
  * Rate limiting configurations
  */
-export const API_REQUEST_DELAY_MS = 100;
+export const DEFAULT_RETRY_ATTEMPTS = 3;
+export const MIN_RETRY_DELAY_MS = 1000;
+export const MAX_RETRY_DELAY_MS = 30000;
 
 /**
  * Special account identifiers

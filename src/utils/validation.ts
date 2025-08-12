@@ -92,9 +92,9 @@ export function validateApiCredentials(apiKey: string | undefined, apiSecret: st
     result.isValid = false;
     result.errors.push('VALR_API_KEY is required');
   } else {
-    if (apiKey.length !== 32) {
+    if (apiKey.length !== 64) {
       result.isValid = false;
-      result.errors.push('VALR_API_KEY must be exactly 32 characters');
+      result.errors.push('VALR_API_KEY must be exactly 64 characters');
     }
     if (!/^[a-f0-9]+$/i.test(apiKey)) {
       result.isValid = false;
@@ -106,9 +106,9 @@ export function validateApiCredentials(apiKey: string | undefined, apiSecret: st
     result.isValid = false;
     result.errors.push('VALR_API_SECRET is required');
   } else {
-    if (apiSecret.length !== 32) {
+    if (apiSecret.length !== 64) {
       result.isValid = false;
-      result.errors.push('VALR_API_SECRET must be exactly 32 characters');
+      result.errors.push('VALR_API_SECRET must be exactly 64 characters');
     }
     if (!/^[a-f0-9]+$/i.test(apiSecret)) {
       result.isValid = false;
