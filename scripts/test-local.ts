@@ -41,8 +41,20 @@ async function testLocal() {
   console.log(`- VALR_API_KEY: ${process.env['VALR_API_KEY'] ? '✅ Set' : '❌ Missing'}`);
   console.log(`- VALR_API_SECRET: ${process.env['VALR_API_SECRET'] ? '✅ Set' : '❌ Missing'}`);
   console.log(`- DRY_RUN: ${process.env['DRY_RUN'] || 'false'}`);
-  console.log(`- MIN_INCREMENT_AMOUNT: ${process.env['MIN_INCREMENT_AMOUNT'] || '{"ZAR": "100", "BTC": "0.0001", "ETH": "0.001"}'}`);
-  console.log(`- MAX_LOAN_RATIO: ${process.env['MAX_LOAN_RATIO'] || '0.8'}\n`);
+  
+  const minIncrement = process.env['MIN_INCREMENT_AMOUNT'];
+  if (minIncrement) {
+    try {
+      const currencies = Object.keys(JSON.parse(minIncrement));
+      console.log(`- MIN_INCREMENT_AMOUNT: ✅ Set (${currencies.length} currencies configured)`);
+    } catch {
+      console.log(`- MIN_INCREMENT_AMOUNT: ❌ Invalid JSON format`);
+    }
+  } else {
+    console.log(`- MIN_INCREMENT_AMOUNT: ❌ Not set (will use API defaults)`);
+  }
+  
+  console.log(`- MAX_LOAN_RATIO: ${process.env['MAX_LOAN_RATIO'] || '1.0'}\n`);
 
   if (!process.env['VALR_API_KEY'] || !process.env['VALR_API_SECRET']) {
     console.error('❌ Missing required environment variables. Please check your .env file.');

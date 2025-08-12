@@ -77,7 +77,7 @@ export interface LoanManagementConfig {
 export interface LoanManagementConfigInput {
   maxLoanRatio: number;
   dryRun: boolean;
-  customMinIncrements?: Record<string, string>;
+  customMinIncrements?: Record<string, string> | undefined;
 }
 
 export interface ProcessingResult {

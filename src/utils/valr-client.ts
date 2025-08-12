@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import * as crypto from 'crypto';
+import { API_TIMEOUT_MS, MAIN_ACCOUNT_ID } from '../constants/currency-defaults';
 import {
   ValrCredentials,
   Subaccount,
@@ -18,7 +19,7 @@ export class ValrClient {
     this.credentials = credentials;
     this.axiosInstance = axios.create({
       baseURL: this.baseUrl,
-      timeout: 30000,
+      timeout: API_TIMEOUT_MS,
       headers: {
         'Content-Type': 'application/json',
       },
@@ -32,7 +33,7 @@ export class ValrClient {
       const subaccountId = config.headers?.['X-VALR-SUB-ACCOUNT-ID'] as string;
 
       // Only include subaccount ID in signature if it's not the main account
-      const signatureSubaccountId = (subaccountId && subaccountId !== '0') ? subaccountId : undefined;
+      const signatureSubaccountId = (subaccountId && subaccountId !== MAIN_ACCOUNT_ID) ? subaccountId : undefined;
       const signature = this.createSignature(timestamp, method, path, body, signatureSubaccountId);
       
       config.headers['X-VALR-API-KEY'] = this.credentials.apiKey;
@@ -62,8 +63,8 @@ export class ValrClient {
   ): Promise<T> {
     try {
       const headers: Record<string, string> = {};
-      // Don't add subaccount header for main account (ID "0")
-      if (subaccountId && subaccountId !== '0') {
+      // Don't add subaccount header for main account
+      if (subaccountId && subaccountId !== MAIN_ACCOUNT_ID) {
         headers['X-VALR-SUB-ACCOUNT-ID'] = subaccountId;
       }
 
@@ -75,10 +76,39 @@ export class ValrClient {
       });
       return response.data;
     } catch (error: any) {
+      // Log full error details internally for debugging
+      console.error('VALR API request failed:', {
+        method,
+        endpoint,
+        status: error.response?.status,
+        data: error.response?.data,
+        message: error.message
+      });
+
       if (error.response?.data) {
-        throw new Error(`VALR API Error: ${JSON.stringify(error.response.data)}`);
+        // Extract safe error information for client
+        const apiData = error.response.data;
+        const statusCode = error.response.status;
+        
+        // Only expose safe error codes and messages
+        if (apiData.code && typeof apiData.code === 'number') {
+          throw new Error(`VALR API Error: {"code":${apiData.code},"message":"${apiData.message || 'Unknown error'}"}`);
+        }
+        
+        // Fallback for HTTP status codes
+        if (statusCode === 401 || statusCode === 403) {
+          throw new Error('VALR API Error: Unauthorized access');
+        } else if (statusCode === 429) {
+          throw new Error('VALR API Error: Rate limit exceeded');
+        } else if (statusCode >= 400 && statusCode < 500) {
+          throw new Error('VALR API Error: Invalid request');
+        } else {
+          throw new Error('VALR API Error: Service unavailable');
+        }
       }
-      throw new Error(`Request failed: ${error.message}`);
+      
+      // Generic error for network/other issues
+      throw new Error('Request failed: Network or service error');
     }
   }
 
