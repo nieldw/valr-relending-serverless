@@ -4,28 +4,91 @@ import { Logger, LogLevel } from '../utils/logger';
 import {
   ValrCredentials,
   LoanManagementConfig,
+  LoanManagementConfigInput,
   ProcessingResult,
   ExecutionSummary,
   Subaccount,
-  SubaccountBalance,
-  LoanOffer,
-  UpdateLoanOfferRequest
+  UpdateLoanRequest
 } from '../types/valr';
 
 const logger = new Logger(LogLevel.INFO);
 
-function getConfig(): LoanManagementConfig {
+function getConfigInput(): LoanManagementConfigInput {
   return {
-    minIncrementAmount: JSON.parse(process.env.MIN_INCREMENT_AMOUNT || '{"ZAR": "100", "BTC": "0.0001", "ETH": "0.001"}'),
-    maxLoanRatio: parseFloat(process.env.MAX_LOAN_RATIO || '0.8'),
-    enabledCurrencies: (process.env.ENABLED_CURRENCIES || 'ZAR,BTC,ETH').split(','),
-    dryRun: process.env.DRY_RUN === 'true',
+    maxLoanRatio: parseFloat(process.env['MAX_LOAN_RATIO'] || '1.0'),
+    dryRun: process.env['DRY_RUN'] === 'true',
+    customMinIncrements: process.env['MIN_INCREMENT_AMOUNT'] ? 
+      JSON.parse(process.env['MIN_INCREMENT_AMOUNT']) : undefined,
   };
 }
 
+async function getConfig(client: ValrClient, activeCurrencies: string[]): Promise<LoanManagementConfig> {
+  const input = getConfigInput();
+  
+  try {
+    const currencies = await client.getCurrencies();
+    const minIncrementAmount: Record<string, string> = {};
+    
+    for (const currency of activeCurrencies) {
+      const currencyInfo = currencies.find(c => c.shortName === currency);
+      
+      if (input.customMinIncrements?.[currency]) {
+        minIncrementAmount[currency] = input.customMinIncrements[currency];
+      } else if (currencyInfo) {
+        const decimals = currencyInfo.withdrawalDecimalPlaces;
+        minIncrementAmount[currency] = (10 ** -decimals).toFixed(decimals);
+      } else {
+        const fallbackValues: Record<string, string> = {
+          'ZAR': '10',
+          'BTC': '0.00001',
+          'ETH': '0.0001',
+          'USDC': '0.01',
+          'USDT': '0.01'
+        };
+        minIncrementAmount[currency] = fallbackValues[currency] || '0.001';
+        logger.warn(`Currency ${currency} not found in API, using fallback minimum`, {
+          currency,
+          fallback: minIncrementAmount[currency]
+        });
+      }
+    }
+    
+    return {
+      minIncrementAmount,
+      maxLoanRatio: input.maxLoanRatio,
+      dryRun: input.dryRun,
+    };
+  } catch (error: any) {
+    logger.warn('Failed to fetch currency info, using fallback values', { error: error.message });
+    
+    const fallbackMinIncrements: Record<string, string> = {};
+    
+    for (const currency of activeCurrencies) {
+      if (input.customMinIncrements?.[currency]) {
+        fallbackMinIncrements[currency] = input.customMinIncrements[currency];
+      } else {
+        const defaultValues: Record<string, string> = {
+          'ZAR': '100',
+          'BTC': '0.0001',
+          'ETH': '0.001',
+          'USDC': '0.01',
+          'USDT': '0.01'
+        };
+        fallbackMinIncrements[currency] = defaultValues[currency] || '0.001';
+      }
+    }
+    
+    return {
+      minIncrementAmount: fallbackMinIncrements,
+      maxLoanRatio: input.maxLoanRatio,
+      dryRun: input.dryRun,
+    };
+  }
+}
+
 function getCredentials(): ValrCredentials {
-  const apiKey = process.env.VALR_API_KEY;
-  const apiSecret = process.env.VALR_API_SECRET;
+  const apiKey = process.env['VALR_API_KEY'];
+  const apiSecret = process.env['VALR_API_SECRET'];
   
   if (!apiKey || !apiSecret) {
     throw new Error('Missing required environment variables: VALR_API_KEY and VALR_API_SECRET');
@@ -51,15 +114,15 @@ async function processSubaccount(
   try {
     logger.info(`Processing subaccount: ${subaccount.label} (${subaccount.id})`);
 
-    const [balances, openOrders] = await Promise.all([
+    const [balances, openLoans] = await Promise.all([
       client.getSubaccountBalances(subaccount.id),
-      client.getOpenOrders(subaccount.id),
+      client.getOpenLoans(subaccount.id),
     ]);
 
-    logger.debug(`Found ${balances.length} balances and ${openOrders.length} open orders`, {
+    logger.debug(`Found ${balances.length} balances and ${openLoans.length} open loans`, {
       subaccountId: subaccount.id,
       balanceCount: balances.length,
-      orderCount: openOrders.length,
+      loanCount: openLoans.length,
     });
 
     const availableBalances = balances.reduce((acc, balance) => {
@@ -67,73 +130,66 @@ async function processSubaccount(
       return acc;
     }, {} as Record<string, number>);
 
-    const loanOffers = openOrders.filter(order => 
-      order.side === 'sell' && config.enabledCurrencies.includes(order.currency_pair.split('ZAR')[0])
-    );
+    const filteredLoans = openLoans;
 
-    result.processedLoans = loanOffers.length;
+    result.processedLoans = filteredLoans.length;
 
-    for (const loan of loanOffers) {
+    for (const loan of filteredLoans) {
       try {
-        const [baseCurrency] = loan.currency_pair.split('ZAR');
+        const currency = loan.currency;
         
-        if (!config.enabledCurrencies.includes(baseCurrency)) {
-          logger.debug(`Skipping loan for disabled currency: ${baseCurrency}`);
-          continue;
-        }
-
-        const availableAmount = availableBalances[baseCurrency] || 0;
-        const minIncrement = parseFloat(config.minIncrementAmount[baseCurrency] || '0');
+        const availableAmount = availableBalances[currency] || 0;
+        const minIncrement = parseFloat(config.minIncrementAmount[currency] || '0');
         
         if (availableAmount < minIncrement) {
-          logger.debug(`Insufficient funds for ${baseCurrency}: ${availableAmount} < ${minIncrement}`);
+          logger.debug(`Insufficient funds for ${currency}: ${availableAmount} < ${minIncrement}`);
           continue;
         }
 
-        const currentQuantity = parseFloat(loan.quantity);
+        const currentQuantity = parseFloat(loan.totalAmount);
         const maxAllowedIncrease = availableAmount * config.maxLoanRatio;
         const actualIncrease = Math.min(availableAmount, maxAllowedIncrease);
         
         if (actualIncrease < minIncrement) {
-          logger.debug(`Increase amount too small for ${baseCurrency}: ${actualIncrease} < ${minIncrement}`);
+          logger.debug(`Increase amount too small for ${currency}: ${actualIncrease} < ${minIncrement}`);
           continue;
         }
 
         const newQuantity = currentQuantity + actualIncrease;
 
-        logger.info(`Planning to increase loan ${loan.id} from ${currentQuantity} to ${newQuantity} ${baseCurrency}`, {
-          loanId: loan.id,
-          currency: baseCurrency,
+        logger.info(`Planning to increase loan ${loan.loanId} from ${currentQuantity} to ${newQuantity} ${currency}`, {
+          loanId: loan.loanId,
+          currency: currency,
           currentQuantity,
           increaseAmount: actualIncrease,
           newQuantity,
         });
 
         if (!config.dryRun) {
-          const updateRequest: UpdateLoanOfferRequest = {
-            quantity: newQuantity.toString(),
+          const updateRequest: UpdateLoanRequest = {
+            totalAmount: newQuantity.toString(),
           };
 
-          await client.updateLoanOffer(subaccount.id, loan.id, updateRequest);
+          await client.updateLoan(subaccount.id, loan.loanId, updateRequest);
           
-          logger.info(`Successfully increased loan ${loan.id}`, {
-            loanId: loan.id,
+          logger.info(`Successfully increased loan ${loan.loanId}`, {
+            loanId: loan.loanId,
             newQuantity,
           });
         } else {
-          logger.info(`DRY RUN: Would increase loan ${loan.id}`, {
-            loanId: loan.id,
+          logger.info(`DRY RUN: Would increase loan ${loan.loanId}`, {
+            loanId: loan.loanId,
             newQuantity,
           });
         }
 
         result.increasedLoans++;
-        result.totalAmountIncreased[baseCurrency] = 
-          (parseFloat(result.totalAmountIncreased[baseCurrency] || '0') + actualIncrease).toString();
+        result.totalAmountIncreased[currency] = 
+          (parseFloat(result.totalAmountIncreased[currency] || '0') + actualIncrease).toString();
 
       } catch (error: any) {
-        const errorMsg = `Failed to process loan ${loan.id}: ${error.message}`;
-        logger.error(errorMsg, { loanId: loan.id }, error);
+        const errorMsg = `Failed to process loan ${loan.loanId}: ${error.message}`;
+        logger.error(errorMsg, { loanId: loan.loanId }, error);
         result.errors.push(errorMsg);
       }
     }
@@ -147,31 +203,47 @@ async function processSubaccount(
   return result;
 }
 
-export const handler: Handler = async (event: HandlerEvent, context: HandlerContext) => {
+export const handler: Handler = async (_event: HandlerEvent, _context: HandlerContext) => {
   const startTime = Date.now();
   logger.info('Starting VALR loan management execution');
 
   try {
     const credentials = getCredentials();
-    const config = getConfig();
     const client = new ValrClient(credentials);
+
+    const subaccounts = await client.getSubaccounts();
+    logger.info(`Found ${subaccounts.length} subaccounts`);
+
+    // Collect all currencies that have active loans across all subaccounts
+    const activeCurrencies = new Set<string>();
+    for (const subaccount of subaccounts) {
+      try {
+        const openLoans = await client.getOpenLoans(subaccount.id);
+        openLoans.forEach(loan => activeCurrencies.add(loan.currency));
+      } catch (error: any) {
+        logger.warn(`Failed to fetch loans for subaccount ${subaccount.id}`, { 
+          subaccountId: subaccount.id,
+          error: error.message 
+        });
+      }
+    }
+    
+    const activeCurrencyList = Array.from(activeCurrencies);
+    logger.info(`Found active loans in currencies: ${activeCurrencyList.join(', ')}`);
+
+    const config = await getConfig(client, activeCurrencyList);
 
     logger.info('Configuration loaded', {
       minIncrementAmount: config.minIncrementAmount,
       maxLoanRatio: config.maxLoanRatio,
-      enabledCurrencies: config.enabledCurrencies,
       dryRun: config.dryRun,
+      activeCurrencies: activeCurrencyList,
     });
-
-    const subaccounts = await client.getSubaccounts();
-    const activeSubaccounts = subaccounts.filter(sub => sub.active);
-    
-    logger.info(`Found ${activeSubaccounts.length} active subaccounts out of ${subaccounts.length} total`);
 
     const results: ProcessingResult[] = [];
     const globalErrors: string[] = [];
 
-    for (const subaccount of activeSubaccounts) {
+    for (const subaccount of subaccounts) {
       try {
         const result = await processSubaccount(client, subaccount, config);
         results.push(result);

@@ -12,6 +12,7 @@ async function testLocal() {
   const mockEvent: HandlerEvent = {
     httpMethod: 'POST',
     headers: {},
+    multiValueHeaders: {},
     path: '/.netlify/functions/manage-loans',
     queryStringParameters: {},
     multiValueQueryStringParameters: {},
@@ -37,21 +38,19 @@ async function testLocal() {
   };
 
   console.log('📊 Environment check:');
-  console.log(`- VALR_API_KEY: ${process.env.VALR_API_KEY ? '✅ Set' : '❌ Missing'}`);
-  console.log(`- VALR_API_SECRET: ${process.env.VALR_API_SECRET ? '✅ Set' : '❌ Missing'}`);
-  console.log(`- DRY_RUN: ${process.env.DRY_RUN || 'false'}`);
-  console.log(`- ENABLED_CURRENCIES: ${process.env.ENABLED_CURRENCIES || 'ZAR,BTC,ETH'}`);
-  console.log(`- MIN_INCREMENT_AMOUNT: ${process.env.MIN_INCREMENT_AMOUNT || '{"ZAR": "100", "BTC": "0.0001", "ETH": "0.001"}'}`);
-  console.log(`- MAX_LOAN_RATIO: ${process.env.MAX_LOAN_RATIO || '0.8'}\n`);
+  console.log(`- VALR_API_KEY: ${process.env['VALR_API_KEY'] ? '✅ Set' : '❌ Missing'}`);
+  console.log(`- VALR_API_SECRET: ${process.env['VALR_API_SECRET'] ? '✅ Set' : '❌ Missing'}`);
+  console.log(`- DRY_RUN: ${process.env['DRY_RUN'] || 'false'}`);
+  console.log(`- MIN_INCREMENT_AMOUNT: ${process.env['MIN_INCREMENT_AMOUNT'] || '{"ZAR": "100", "BTC": "0.0001", "ETH": "0.001"}'}`);
+  console.log(`- MAX_LOAN_RATIO: ${process.env['MAX_LOAN_RATIO'] || '0.8'}\n`);
 
-  if (!process.env.VALR_API_KEY || !process.env.VALR_API_SECRET) {
+  if (!process.env['VALR_API_KEY'] || !process.env['VALR_API_SECRET']) {
     console.error('❌ Missing required environment variables. Please check your .env file.');
     console.log('\nRequired variables:');
     console.log('- VALR_API_KEY=your_api_key_here');
     console.log('- VALR_API_SECRET=your_api_secret_here');
     console.log('\nOptional variables:');
     console.log('- DRY_RUN=true (for testing without making actual changes)');
-    console.log('- ENABLED_CURRENCIES=ZAR,BTC,ETH (comma-separated)');
     console.log('- MIN_INCREMENT_AMOUNT={"ZAR": "100", "BTC": "0.0001", "ETH": "0.001"}');
     console.log('- MAX_LOAN_RATIO=0.8');
     process.exit(1);
@@ -67,6 +66,11 @@ async function testLocal() {
     
     console.log('✅ Function executed successfully!');
     console.log(`⏱️  Duration: ${duration}ms\n`);
+    
+    if (!result) {
+      console.log('No result returned from handler');
+      return;
+    }
     
     console.log('📋 Response:');
     console.log(`Status Code: ${result.statusCode}`);
@@ -109,7 +113,9 @@ async function testLocal() {
           }
         }
       } catch (parseError) {
-        console.log('Raw Body:', result.body);
+        if (result && result.body) {
+          console.log('Raw Body:', result.body);
+        }
       }
     }
     

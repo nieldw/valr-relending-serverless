@@ -2,12 +2,11 @@ import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import * as crypto from 'crypto';
 import {
   ValrCredentials,
-  ValrApiResponse,
   Subaccount,
   SubaccountBalance,
-  LoanOffer,
-  CreateLoanOfferRequest,
-  UpdateLoanOfferRequest
+  OpenLoan,
+  CurrencyInfo,
+  UpdateLoanRequest
 } from '../types/valr';
 
 export class ValrClient {
@@ -30,8 +29,11 @@ export class ValrClient {
       const method = config.method?.toUpperCase() || 'GET';
       const path = config.url || '';
       const body = config.data ? JSON.stringify(config.data) : '';
-      
-      const signature = this.createSignature(timestamp, method, path, body);
+      const subaccountId = config.headers?.['X-VALR-SUB-ACCOUNT-ID'] as string;
+
+      // Only include subaccount ID in signature if it's not the main account
+      const signatureSubaccountId = (subaccountId && subaccountId !== '0') ? subaccountId : undefined;
+      const signature = this.createSignature(timestamp, method, path, body, signatureSubaccountId);
       
       config.headers['X-VALR-API-KEY'] = this.credentials.apiKey;
       config.headers['X-VALR-SIGNATURE'] = signature;
@@ -41,8 +43,11 @@ export class ValrClient {
     });
   }
 
-  private createSignature(timestamp: string, method: string, path: string, body: string = ''): string {
-    const payload = `${timestamp}${method}${path}${body}`;
+  private createSignature(timestamp: string, method: string, path: string, body: string = '', subaccountId?: string): string {
+    let payload = `${timestamp}${method}${path}${body}`;
+    if (subaccountId) {
+      payload += subaccountId;
+    }
     return crypto
       .createHmac('sha512', this.credentials.apiSecret)
       .update(payload)
@@ -52,13 +57,21 @@ export class ValrClient {
   private async makeRequest<T>(
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     endpoint: string,
-    data?: any
+    data?: any,
+    subaccountId?: string
   ): Promise<T> {
     try {
+      const headers: Record<string, string> = {};
+      // Don't add subaccount header for main account (ID "0")
+      if (subaccountId && subaccountId !== '0') {
+        headers['X-VALR-SUB-ACCOUNT-ID'] = subaccountId;
+      }
+
       const response: AxiosResponse<T> = await this.axiosInstance.request({
         method,
         url: endpoint,
         data,
+        headers,
       });
       return response.data;
     } catch (error: any) {
@@ -74,45 +87,26 @@ export class ValrClient {
   }
 
   async getSubaccountBalances(subaccountId: string): Promise<SubaccountBalance[]> {
-    return this.makeRequest<SubaccountBalance[]>('GET', `/v1/account/${subaccountId}/balances`);
+    return this.makeRequest<SubaccountBalance[]>('GET', '/v1/account/balances', undefined, subaccountId);
   }
 
-  async getOpenOrders(subaccountId: string, currencyPair?: string): Promise<LoanOffer[]> {
-    const params = currencyPair ? `?currency_pair=${currencyPair}` : '';
-    return this.makeRequest<LoanOffer[]>('GET', `/v1/orders/open${params}`, {
-      headers: { 'X-VALR-SUB-ACCOUNT-ID': subaccountId }
-    });
+  async getOpenLoans(subaccountId: string, currency?: string): Promise<OpenLoan[]> {
+    const params = currency ? `?currency=${currency}` : '';
+    return this.makeRequest<OpenLoan[]>('GET', `/v1/loans/open${params}`, undefined, subaccountId);
   }
 
-  async createLoanOffer(subaccountId: string, orderRequest: CreateLoanOfferRequest): Promise<LoanOffer> {
-    return this.makeRequest<LoanOffer>('POST', '/v1/orders/limit', {
-      ...orderRequest,
-      headers: { 'X-VALR-SUB-ACCOUNT-ID': subaccountId }
-    });
-  }
-
-  async updateLoanOffer(
+  async updateLoan(
     subaccountId: string,
-    orderId: string,
-    updateRequest: UpdateLoanOfferRequest
-  ): Promise<LoanOffer> {
-    return this.makeRequest<LoanOffer>('PUT', `/v1/orders/${orderId}`, {
-      ...updateRequest,
-      headers: { 'X-VALR-SUB-ACCOUNT-ID': subaccountId }
-    });
+    loanId: string,
+    updateRequest: UpdateLoanRequest
+  ): Promise<OpenLoan> {
+    return this.makeRequest<OpenLoan>('PUT', '/v1/loans/increase', {
+      loanId,
+      ...updateRequest
+    }, subaccountId);
   }
 
-  async cancelOrder(subaccountId: string, orderId: string): Promise<void> {
-    await this.makeRequest<void>('DELETE', `/v1/orders/${orderId}`, {
-      headers: { 'X-VALR-SUB-ACCOUNT-ID': subaccountId }
-    });
-  }
-
-  async getOrderBook(currencyPair: string): Promise<any> {
-    return this.makeRequest<any>('GET', `/v1/public/orderbook/${currencyPair}`);
-  }
-
-  async getTicker(currencyPair: string): Promise<any> {
-    return this.makeRequest<any>('GET', `/v1/public/ticker/${currencyPair}`);
+  async getCurrencies(): Promise<CurrencyInfo[]> {
+    return this.makeRequest<CurrencyInfo[]>('GET', '/v1/public/currencies');
   }
 }

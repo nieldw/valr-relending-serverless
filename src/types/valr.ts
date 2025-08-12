@@ -3,17 +3,10 @@ export interface ValrCredentials {
   apiSecret: string;
 }
 
-export interface ValrApiResponse<T> {
-  data?: T;
-  error?: string;
-  message?: string;
-}
 
 export interface Subaccount {
   id: string;
   label: string;
-  active: boolean;
-  created_at: string;
 }
 
 export interface SubaccountBalance {
@@ -38,6 +31,25 @@ export interface LoanOffer {
   updated_time: string;
 }
 
+export interface OpenLoan {
+  loanId: string;
+  currency: string;
+  totalAmount: string;
+  usedAmount: string;
+  hourlyRate: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CurrencyInfo {
+  symbol: string;
+  isActive: boolean;
+  shortName: string;
+  longName: string;
+  decimalPlaces: number;
+  withdrawalDecimalPlaces: number;
+}
+
 export interface CreateLoanOfferRequest {
   side: 'buy' | 'sell';
   quantity: string;
@@ -52,11 +64,20 @@ export interface UpdateLoanOfferRequest {
   price?: string;
 }
 
+export interface UpdateLoanRequest {
+  totalAmount: string;
+}
+
 export interface LoanManagementConfig {
   minIncrementAmount: Record<string, string>;
   maxLoanRatio: number;
-  enabledCurrencies: string[];
   dryRun: boolean;
+}
+
+export interface LoanManagementConfigInput {
+  maxLoanRatio: number;
+  dryRun: boolean;
+  customMinIncrements?: Record<string, string>;
 }
 
 export interface ProcessingResult {
