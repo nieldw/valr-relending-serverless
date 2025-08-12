@@ -12,7 +12,10 @@ import {
   ExecutionSummary,
   Subaccount,
   UpdateLoanRequest,
-  OpenLoan
+  OpenLoan,
+  PlannedLoanIncrease,
+  LoanExecutionPlan,
+  ExecutionResult
 } from '../types/valr';
 
 const logger = new Logger(LogLevel.INFO);
@@ -112,23 +115,16 @@ function getCredentials(): ValrCredentials {
   return { apiKey, apiSecret };
 }
 
-async function processSubaccount(
+async function planSubaccountIncreases(
   client: ValrClient,
   subaccount: Subaccount,
   config: LoanManagementConfig,
   cachedLoans?: OpenLoan[]
-): Promise<ProcessingResult> {
-  const result: ProcessingResult = {
-    subaccountId: subaccount.id,
-    subaccountLabel: subaccount.label,
-    processedLoans: 0,
-    increasedLoans: 0,
-    totalAmountIncreased: {},
-    errors: [],
-  };
+): Promise<PlannedLoanIncrease[]> {
+  const plannedIncreases: PlannedLoanIncrease[] = [];
 
   try {
-    logger.info(`Processing subaccount: ${subaccount.label} (${subaccount.id})`);
+    logger.info(`Planning increases for subaccount: ${subaccount.label} (${subaccount.id})`);
 
     const balances = await client.getSubaccountBalances(subaccount.id);
     const openLoans = cachedLoans || await client.getOpenLoans(subaccount.id);
@@ -143,8 +139,6 @@ async function processSubaccount(
       acc[balance.currency] = balance.available;
       return acc;
     }, {} as Record<string, string>);
-
-    result.processedLoans = openLoans.length;
 
     for (const loan of openLoans) {
       try {
@@ -172,7 +166,19 @@ async function processSubaccount(
 
         const newQuantity = currentQuantity.add(actualIncrease);
 
-        logger.info(`Planning to increase loan ${loan.loanId} from ${currentQuantity.toString()} to ${newQuantity.toString()} ${currency}`, {
+        const plannedIncrease: PlannedLoanIncrease = {
+          subaccountId: subaccount.id,
+          subaccountLabel: subaccount.label,
+          loanId: loan.loanId,
+          currency: currency,
+          currentAmount: currentQuantity.toString(),
+          increaseAmount: actualIncrease.toString(),
+          newAmount: newQuantity.toString(),
+        };
+
+        plannedIncreases.push(plannedIncrease);
+
+        logger.info(`Planned increase for loan ${loan.loanId} from ${currentQuantity.toString()} to ${newQuantity.toString()} ${currency}`, {
           loanId: loan.loanId,
           currency: currency,
           currentQuantity: currentQuantity.toString(),
@@ -180,43 +186,201 @@ async function processSubaccount(
           newQuantity: newQuantity.toString(),
         });
 
-        if (!config.dryRun) {
-          const updateRequest: UpdateLoanRequest = {
-            totalAmount: newQuantity.toString(),
-          };
-
-          await client.updateLoan(subaccount.id, loan.loanId, updateRequest);
-          
-          logger.info(`Successfully increased loan ${loan.loanId}`, {
-            loanId: loan.loanId,
-            newQuantity: newQuantity.toString(),
-          });
-        } else {
-          logger.info(`DRY RUN: Would increase loan ${loan.loanId}`, {
-            loanId: loan.loanId,
-            newQuantity: newQuantity.toString(),
-          });
-        }
-
-        result.increasedLoans++;
-        const previousTotal = parseFinancialAmount(result.totalAmountIncreased[currency] || '0');
-        result.totalAmountIncreased[currency] = previousTotal.add(actualIncrease).toString();
-
       } catch (error: any) {
-        const errorMsg = `Failed to process loan ${loan.loanId}: ${error.message}`;
-        logger.error(errorMsg, { loanId: loan.loanId }, error);
-        result.errors.push(errorMsg);
+        logger.error(`Failed to plan increase for loan ${loan.loanId}`, { 
+          loanId: loan.loanId,
+          error: error.message 
+        }, error);
       }
     }
 
   } catch (error: any) {
-    const errorMsg = `Failed to process subaccount ${subaccount.id}: ${error.message}`;
-    logger.error(errorMsg, { subaccountId: subaccount.id }, error);
-    result.errors.push(errorMsg);
+    logger.error(`Failed to plan increases for subaccount ${subaccount.id}`, { 
+      subaccountId: subaccount.id,
+      error: error.message 
+    }, error);
   }
 
-  return result;
+  return plannedIncreases;
 }
+
+async function executeIncrease(
+  client: ValrClient,
+  plannedIncrease: PlannedLoanIncrease,
+  config: LoanManagementConfig
+): Promise<ExecutionResult> {
+  const startTime = Date.now();
+  
+  try {
+    logger.info(`Executing increase for loan ${plannedIncrease.loanId}`, {
+      loanId: plannedIncrease.loanId,
+      currency: plannedIncrease.currency,
+      from: plannedIncrease.currentAmount,
+      to: plannedIncrease.newAmount,
+      increase: plannedIncrease.increaseAmount
+    });
+
+    if (!config.dryRun) {
+      const updateRequest: UpdateLoanRequest = {
+        totalAmount: plannedIncrease.newAmount,
+      };
+
+      await client.updateLoan(plannedIncrease.subaccountId, plannedIncrease.loanId, updateRequest);
+      
+      logger.info(`Successfully increased loan ${plannedIncrease.loanId}`, {
+        loanId: plannedIncrease.loanId,
+        newQuantity: plannedIncrease.newAmount,
+      });
+    } else {
+      logger.info(`DRY RUN: Would increase loan ${plannedIncrease.loanId}`, {
+        loanId: plannedIncrease.loanId,
+        newQuantity: plannedIncrease.newAmount,
+      });
+    }
+
+    return {
+      plannedIncrease,
+      success: true,
+      executedAt: new Date().toISOString(),
+      durationMs: Date.now() - startTime
+    };
+
+  } catch (error: any) {
+    const errorMsg = `Failed to execute increase for loan ${plannedIncrease.loanId}: ${error.message}`;
+    logger.error(errorMsg, { loanId: plannedIncrease.loanId }, error);
+    
+    return {
+      plannedIncrease,
+      success: false,
+      error: errorMsg,
+      executedAt: new Date().toISOString(),
+      durationMs: Date.now() - startTime
+    };
+  }
+}
+
+async function createExecutionPlan(
+  client: ValrClient,
+  subaccounts: Subaccount[],
+  config: LoanManagementConfig,
+  loanCache: Map<string, OpenLoan[]>
+): Promise<LoanExecutionPlan> {
+  const allPlannedIncreases: PlannedLoanIncrease[] = [];
+  
+  logger.info('Creating execution plan for all subaccounts');
+  
+  // Collect planned increases from all subaccounts in parallel
+  const planningPromises = subaccounts.map(async (subaccount) => {
+    try {
+      const cachedLoans = loanCache.get(subaccount.id) || [];
+      const plannedIncreases = await planSubaccountIncreases(client, subaccount, config, cachedLoans);
+      return { subaccountId: subaccount.id, plannedIncreases, error: null };
+    } catch (error: any) {
+      logger.error(`Failed to plan increases for subaccount ${subaccount.id}`, {
+        subaccountId: subaccount.id,
+        error: error.message
+      }, error);
+      return { subaccountId: subaccount.id, plannedIncreases: [], error: error.message };
+    }
+  });
+
+  const planningResults = await Promise.allSettled(planningPromises);
+  planningResults.forEach(result => {
+    if (result.status === 'fulfilled') {
+      allPlannedIncreases.push(...result.value.plannedIncreases);
+    }
+  });
+
+  // Calculate totals by currency
+  const totalIncreasesByCurrency: Record<string, string> = {};
+  for (const increase of allPlannedIncreases) {
+    const current = parseFinancialAmount(totalIncreasesByCurrency[increase.currency] || '0');
+    const additional = parseFinancialAmount(increase.increaseAmount);
+    totalIncreasesByCurrency[increase.currency] = current.add(additional).toString();
+  }
+
+  // Estimate execution time (conservative: 200ms per increase + 500ms buffer)
+  const estimatedExecutionTimeMs = allPlannedIncreases.length * 200 + 500;
+
+  // Simple risk assessment
+  const riskAssessment = allPlannedIncreases.length === 0 
+    ? 'No increases planned'
+    : allPlannedIncreases.length < 5 
+    ? 'Low risk - few increases'
+    : allPlannedIncreases.length < 15
+    ? 'Medium risk - moderate increases'
+    : 'High risk - many increases';
+
+  const executionPlan: LoanExecutionPlan = {
+    plannedIncreases: allPlannedIncreases,
+    totalIncreasesByCurrency,
+    estimatedExecutionTimeMs,
+    riskAssessment
+  };
+
+  logger.info('Execution plan created', {
+    totalIncreases: allPlannedIncreases.length,
+    totalIncreasesByCurrency,
+    estimatedExecutionTimeMs,
+    riskAssessment
+  });
+
+  return executionPlan;
+}
+
+async function executeSequentially(
+  client: ValrClient,
+  executionPlan: LoanExecutionPlan,
+  config: LoanManagementConfig
+): Promise<ExecutionResult[]> {
+  const executionResults: ExecutionResult[] = [];
+  
+  logger.info('Starting sequential execution of planned increases', {
+    totalIncreases: executionPlan.plannedIncreases.length,
+    estimatedTimeMs: executionPlan.estimatedExecutionTimeMs
+  });
+
+  for (let i = 0; i < executionPlan.plannedIncreases.length; i++) {
+    const plannedIncrease = executionPlan.plannedIncreases[i];
+    if (!plannedIncrease) continue;
+    
+    logger.info(`Executing increase ${i + 1}/${executionPlan.plannedIncreases.length}`, {
+      progress: `${i + 1}/${executionPlan.plannedIncreases.length}`,
+      loanId: plannedIncrease.loanId,
+      currency: plannedIncrease.currency,
+      amount: plannedIncrease.increaseAmount
+    });
+
+    const result = await executeIncrease(client, plannedIncrease, config);
+    executionResults.push(result);
+
+    if (!result.success) {
+      logger.warn('Failed to execute increase, continuing with next', {
+        loanId: plannedIncrease.loanId,
+        error: result.error,
+        remaining: executionPlan.plannedIncreases.length - i - 1
+      });
+    }
+
+    // Small delay between executions to be gentle on the API
+    if (i < executionPlan.plannedIncreases.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+
+  const successCount = executionResults.filter(r => r.success).length;
+  const failureCount = executionResults.filter(r => !r.success).length;
+
+  logger.info('Sequential execution completed', {
+    totalExecuted: executionResults.length,
+    successCount,
+    failureCount,
+    successRate: `${Math.round((successCount / executionResults.length) * 100)}%`
+  });
+
+  return executionResults;
+}
+
 
 export const handler: Handler = async (_event: HandlerEvent, _context: HandlerContext) => {
   const startTime = Date.now();
@@ -290,42 +454,59 @@ export const handler: Handler = async (_event: HandlerEvent, _context: HandlerCo
       activeCurrencies: activeCurrencyList,
     });
 
-    // Process subaccounts in parallel using cached loan data
-    const processingPromises = subaccounts.map(async (subaccount) => {
-      try {
-        const cachedLoans = loanCache.get(subaccount.id) || [];
-        const result = await processSubaccount(client, subaccount, config, cachedLoans);
-        return { success: true, result, error: null };
-      } catch (error: any) {
-        const errorMsg = `Critical error processing subaccount ${subaccount.id}: ${error.message}`;
-        logger.error(errorMsg, { subaccountId: subaccount.id }, error);
-        return { success: false, result: null, error: errorMsg };
-      }
+    // PHASE 1: Create execution plan by calculating all increases
+    const executionPlan = await createExecutionPlan(client, subaccounts, config, loanCache);
+    
+    logger.info('Execution plan created', {
+      totalIncreases: executionPlan.plannedIncreases.length,
+      totalIncreasesByCurrency: executionPlan.totalIncreasesByCurrency,
+      estimatedExecutionTimeMs: executionPlan.estimatedExecutionTimeMs,
+      riskAssessment: executionPlan.riskAssessment
     });
 
-    const processingResults = await Promise.allSettled(processingPromises);
+    // PHASE 2: Execute increases sequentially
+    const executionResults = await executeSequentially(client, executionPlan, config);
+    
+    // Convert execution results back to legacy ProcessingResult format for compatibility
     const results: ProcessingResult[] = [];
     const globalErrors: string[] = [];
-
-    processingResults.forEach((promiseResult, index) => {
-      if (promiseResult.status === 'fulfilled') {
-        const { success, result, error } = promiseResult.value;
-        if (success && result) {
-          results.push(result);
-          if (result.errors.length > 0) {
-            globalErrors.push(...result.errors);
-          }
-        } else if (error) {
-          globalErrors.push(error);
-        }
-      } else {
-        const subaccount = subaccounts[index];
-        const subaccountId = subaccount?.id || `unknown-${index}`;
-        const errorMsg = `Promise rejected for subaccount ${subaccountId}: ${promiseResult.reason}`;
-        logger.error(errorMsg, { subaccountId });
-        globalErrors.push(errorMsg);
+    
+    // Group execution results by subaccount for legacy compatibility
+    const resultsBySubaccount = new Map<string, ExecutionResult[]>();
+    for (const execResult of executionResults) {
+      const subaccountId = execResult.plannedIncrease.subaccountId;
+      if (!resultsBySubaccount.has(subaccountId)) {
+        resultsBySubaccount.set(subaccountId, []);
       }
-    });
+      resultsBySubaccount.get(subaccountId)!.push(execResult);
+    }
+    
+    // Create ProcessingResult for each subaccount
+    for (const subaccount of subaccounts) {
+      const subaccountResults = resultsBySubaccount.get(subaccount.id) || [];
+      const successfulResults = subaccountResults.filter(r => r.success);
+      const failedResults = subaccountResults.filter(r => !r.success);
+      
+      const totalAmountIncreased: Record<string, string> = {};
+      for (const result of successfulResults) {
+        const currency = result.plannedIncrease.currency;
+        const current = parseFinancialAmount(totalAmountIncreased[currency] || '0');
+        const additional = parseFinancialAmount(result.plannedIncrease.increaseAmount);
+        totalAmountIncreased[currency] = current.add(additional).toString();
+      }
+      
+      const subaccountErrors = failedResults.map(r => r.error || 'Unknown error');
+      globalErrors.push(...subaccountErrors);
+      
+      results.push({
+        subaccountId: subaccount.id,
+        subaccountLabel: subaccount.label,
+        processedLoans: subaccountResults.length,
+        increasedLoans: successfulResults.length,
+        totalAmountIncreased,
+        errors: subaccountErrors
+      });
+    }
 
     const executionSummary: ExecutionSummary = {
       timestamp: new Date().toISOString(),
@@ -336,6 +517,8 @@ export const handler: Handler = async (_event: HandlerEvent, _context: HandlerCo
       results,
       errors: globalErrors,
       durationMs: Date.now() - startTime,
+      executionPlan,
+      executionResults
     };
 
     logger.info('Execution completed', {

@@ -89,6 +89,32 @@ export interface ProcessingResult {
   errors: string[];
 }
 
+export interface PlannedLoanIncrease {
+  subaccountId: string;
+  subaccountLabel: string;
+  loanId: string;
+  currency: string;
+  currentAmount: string;
+  increaseAmount: string;
+  newAmount: string;
+  priority?: number;
+}
+
+export interface LoanExecutionPlan {
+  plannedIncreases: PlannedLoanIncrease[];
+  totalIncreasesByCurrency: Record<string, string>;
+  estimatedExecutionTimeMs: number;
+  riskAssessment: string;
+}
+
+export interface ExecutionResult {
+  plannedIncrease: PlannedLoanIncrease;
+  success: boolean;
+  error?: string;
+  executedAt: string;
+  durationMs: number;
+}
+
 export interface ExecutionSummary {
   timestamp: string;
   totalSubaccounts: number;
@@ -98,4 +124,6 @@ export interface ExecutionSummary {
   results: ProcessingResult[];
   errors: string[];
   durationMs: number;
+  executionPlan?: LoanExecutionPlan;
+  executionResults?: ExecutionResult[];
 }
