@@ -1,271 +1,274 @@
-# Refactor Plan - Sequential Loan Processing Architecture
-*Generated: 2025-08-12*
+# Refactor Plan - determineIncrements Enhancement
+*Generated: 2025-08-13*
 
 ## Initial State Analysis
 
 ### Current Architecture
-The VALR loan management system currently uses an **immediate processing** pattern:
+The `determineIncrements` function currently has several issues:
 
-1. **Data Collection Phase** (parallel):
-   - Fetch all subaccounts
-   - Fetch loans for each subaccount 
-   - Build currency cache and loan cache
-
-2. **Processing Phase** (parallel):
-   - For each subaccount, call `processSubaccount()`
-   - Each `processSubaccount()` calculates AND applies increases immediately
-   - Each loan increase is applied via API as soon as it's calculated
-
-### Current Flow in `processSubaccount()` (lines 115-219):
-```
-For each loan in subaccount:
-  ├── Calculate if increase is warranted
-  ├── If yes: Log planned increase  
-  ├── Immediately apply via API call (lines 183-199)
-  └── Update metrics
+**Current Implementation (lines 59-66 in manage-loans.ts):**
+```typescript
+const determineIncrements = (increment: string) => {
+    const parts = increment.split('.');
+    return {
+        minIncrement: increment,
+        decimalPlaces: parts.length > 1 && parts[1] ? parts[1].length : 0
+    }
+}
 ```
 
 ### Problem Areas
-- **Tight coupling**: Calculation and execution are intertwined
-- **Limited visibility**: Can't see total planned changes before execution
-- **Error handling**: Partial failures leave system in unknown state
-- **Resource planning**: No upfront view of total financial impact
-- **Optimization**: Can't prioritize or reorder increases strategically
+
+1. **Local Function Scope**: Defined inside `getConfig()`, not reusable
+2. **Scattered Logic**: Decision between API decimal places vs string-derived decimal places is spread across multiple places:
+   - Line 82: `currencyInfo ? currencyInfo.withdrawalDecimalPlaces : determineIncrements(customIncrement).decimalPlaces`
+   - Line 84: `currencyInfo.withdrawalDecimalPlaces` 
+   - Lines 88, 119, 122: `determineIncrements(fallback)` calls
+3. **Inconsistent Usage Patterns**:
+   - Sometimes: `determineIncrements(customIncrement).decimalPlaces` (only accessing decimalPlaces)
+   - Sometimes: `({minIncrement, decimalPlaces} = determineIncrements(fallback))` (destructuring both)
+4. **Repeated Logic**: Similar conditional logic in both success and error handling paths
+5. **No CurrencyInfo Integration**: Function doesn't know about API currency information
+
+### Current Usage Locations
+1. **Line 82**: `determineIncrements(customIncrement).decimalPlaces` - only need decimal places
+2. **Line 88**: `({minIncrement, decimalPlaces} = determineIncrements(fallback))` - need both
+3. **Line 119**: `determineIncrements(customIncrement).decimalPlaces` - only need decimal places
+4. **Line 122**: `({minIncrement, decimalPlaces} = determineIncrements(fallback))` - need both
 
 ## Target Architecture
 
-### New Sequential Processing Pattern
-> **Goal**: "Calculate all loan increases across all subaccounts before applying the increases sequentially"
+### Enhanced determineIncrements Function
+**Goal**: Create a centralized utility that handles currency increment determination with optional API currency information.
 
-**Phase 1: Planning** (calculate all increases):
-```
-For each subaccount:
-  For each loan:
-    ├── Calculate potential increase
-    ├── Store in planned increases list
-    └── NO API calls yet
+**New Function Signature:**
+```typescript
+export function determineIncrements(
+  increment: string,
+  currencyInfo?: CurrencyInfo
+): {
+  minIncrement: string;
+  decimalPlaces: number;
+}
 ```
 
-**Phase 2: Execution** (apply sequentially):
-```
-For each planned increase (in sequence):
-  ├── Apply via API call
-  ├── Update metrics
-  └── Handle errors individually
-```
+**Logic Priority:**
+1. **If currencyInfo provided**: Use `currencyInfo.withdrawalDecimalPlaces` for decimal places
+2. **If no currencyInfo**: Parse decimal places from increment string
+3. **Always**: Return the increment string as minIncrement
 
 ### Benefits
-1. **Resource Planning**: Know total financial impact upfront
-2. **Better Error Handling**: Can validate all before applying any  
-3. **Optimization**: Can prioritize increases by amount, currency, risk
-4. **Better Reporting**: Show complete execution plan before starting
-5. **Atomic-like Behavior**: Clear separation between planning and execution
+1. **Centralized Logic**: All increment determination logic in one place
+2. **API-First Approach**: Automatically prefers API decimal places when available
+3. **Reusable**: Can be used anywhere in the codebase
+4. **Testable**: Standalone function that can be unit tested
+5. **Consistent Interface**: Always returns same structure regardless of input
+6. **Simplified Calling Code**: No more conditional logic at call sites
 
 ## Refactoring Tasks
 
-### High Priority Tasks
-
-#### 1. Create New Data Structures
-**File**: `src/types/valr.ts`
+### 1. Extract and Enhance determineIncrements Function
+**File**: `src/utils/decimal.ts`
 **Risk**: Low
 **Status**: Pending
 
-Add new interfaces to support planned increases:
+**Actions**:
+- Move `determineIncrements` from `manage-loans.ts` to `decimal.ts`
+- Add optional `currencyInfo?: CurrencyInfo` parameter
+- Implement API-first decimal place determination logic
+- Add JSDoc documentation
+- Export the function
+
+**New Implementation**:
 ```typescript
-export interface PlannedLoanIncrease {
-  subaccountId: string;
-  subaccountLabel: string; 
-  loanId: string;
-  currency: string;
-  currentAmount: string;
-  increaseAmount: string;
-  newAmount: string;
-  priority?: number;
-}
-
-export interface LoanExecutionPlan {
-  plannedIncreases: PlannedLoanIncrease[];
-  totalIncreasesByCurrency: Record<string, string>;
-  estimatedExecutionTime: number;
-  riskAssessment: string;
-}
-
-export interface ExecutionResult {
-  plannedIncrease: PlannedLoanIncrease;
-  success: boolean;
-  error?: string;
-  executedAt: string;
+/**
+ * Determines minimum increment amount and decimal places for a currency
+ * @param increment - The increment amount as string (e.g., "1", "0.01", "0.001")
+ * @param currencyInfo - Optional API currency information
+ * @returns Object with minIncrement string and decimalPlaces number
+ */
+export function determineIncrements(
+  increment: string,
+  currencyInfo?: CurrencyInfo
+): {
+  minIncrement: string;
+  decimalPlaces: number;
+} {
+  const minIncrement = increment;
+  
+  // Prefer API decimal places when available
+  if (currencyInfo) {
+    return {
+      minIncrement,
+      decimalPlaces: currencyInfo.withdrawalDecimalPlaces
+    };
+  }
+  
+  // Fallback: Parse decimal places from increment string
+  const parts = increment.split('.');
+  const decimalPlaces = parts.length > 1 && parts[1] ? parts[1].length : 0;
+  
+  return {
+    minIncrement,
+    decimalPlaces
+  };
 }
 ```
 
-#### 2. Split processSubaccount() Function
+### 2. Update Imports in manage-loans.ts
 **File**: `src/functions/manage-loans.ts`
+**Risk**: Low
+**Status**: Pending
+
+**Actions**:
+- Add `determineIncrements` to import from `../utils/decimal`
+- Remove local `determineIncrements` function definition
+
+**Before**:
+```typescript
+import {calculateIncrease, parseFinancialAmount} from '../utils/decimal';
+```
+
+**After**:
+```typescript
+import {calculateIncrease, parseFinancialAmount, determineIncrements} from '../utils/decimal';
+```
+
+### 3. Simplify getConfig Success Path Logic
+**File**: `src/functions/manage-loans.ts` 
 **Risk**: Medium
 **Status**: Pending
 
-Create two new functions:
-- `planSubaccountIncreases()`: Calculate increases without applying
-- `executeIncrease()`: Apply a single planned increase
+**Actions**:
+- Replace complex conditional logic with simple `determineIncrements` calls
+- Pass `currencyInfo` when available
 
-#### 3. Create Planning Phase Function
-**File**: `src/functions/manage-loans.ts`
-**Risk**: Medium  
-**Status**: Pending
-
-New function: `createExecutionPlan()` that:
-- Calls `planSubaccountIncreases()` for each subaccount
-- Collects all planned increases
-- Calculates totals and risk assessment
-- Returns `LoanExecutionPlan`
-
-#### 4. Create Sequential Execution Function
-**File**: `src/functions/manage-loans.ts`
-**Risk**: High
-**Status**: Pending
-
-New function: `executeSequentially()` that:
-- Takes a `LoanExecutionPlan`
-- Applies increases one by one (not parallel)
-- Tracks success/failure for each
-- Provides detailed execution report
-
-#### 5. Update Main Handler
-**File**: `src/functions/manage-loans.ts` 
-**Risk**: High
-**Status**: Pending
-
-Modify main handler to:
+**Before (lines 78-88)**:
 ```typescript
-// Phase 1: Planning
-const executionPlan = await createExecutionPlan(client, subaccounts, config, loanCache);
-logger.info('Execution plan created', {
-  totalIncreases: executionPlan.plannedIncreases.length,
-  totalAmountByCurrency: executionPlan.totalIncreasesByCurrency
-});
-
-// Phase 2: Sequential Execution  
-const executionResults = await executeSequentially(client, executionPlan, config);
+if (input.customMinIncrements?.[currency]) {
+    const customIncrement = input.customMinIncrements[currency];
+    minIncrement = customIncrement;
+    decimalPlaces = currencyInfo ? currencyInfo.withdrawalDecimalPlaces : determineIncrements(customIncrement).decimalPlaces;
+} else if (currencyInfo) {
+    decimalPlaces = currencyInfo.withdrawalDecimalPlaces;
+    minIncrement = (10 ** -decimalPlaces).toFixed(decimalPlaces);
+} else {
+    const fallback = DEFAULT_CURRENCY_INCREMENTS[currency] || '0.001';
+    ({minIncrement, decimalPlaces} = determineIncrements(fallback));
+    // ... logging
+}
 ```
 
-### Medium Priority Tasks
+**After**:
+```typescript
+if (input.customMinIncrements?.[currency]) {
+    const customIncrement = input.customMinIncrements[currency];
+    ({minIncrement, decimalPlaces} = determineIncrements(customIncrement, currencyInfo));
+} else if (currencyInfo) {
+    const apiIncrement = (10 ** -currencyInfo.withdrawalDecimalPlaces).toFixed(currencyInfo.withdrawalDecimalPlaces);
+    ({minIncrement, decimalPlaces} = determineIncrements(apiIncrement, currencyInfo));
+} else {
+    const fallback = DEFAULT_CURRENCY_INCREMENTS[currency] || '0.001';
+    ({minIncrement, decimalPlaces} = determineIncrements(fallback));
+    logger.warn(`Currency ${currency} not found in API, using fallback minimum`, {
+        currency,
+        fallback: minIncrement
+    });
+}
+```
 
-#### 6. Add Increase Prioritization
+### 4. Simplify getConfig Error Path Logic
 **File**: `src/functions/manage-loans.ts`
 **Risk**: Low
 **Status**: Pending
 
-Add logic to prioritize increases by:
-- Amount (largest first)
-- Currency (stable currencies first)
-- Risk level (lowest risk first)
+**Actions**:
+- Simplify error handling fallback logic using enhanced `determineIncrements`
 
-#### 7. Enhanced Logging and Reporting
-**File**: `src/functions/manage-loans.ts`
-**Risk**: Low  
-**Status**: Pending
+**Before (lines 115-122)**:
+```typescript
+if (input.customMinIncrements?.[currency]) {
+    const customIncrement = input.customMinIncrements[currency];
+    minIncrement = customIncrement;
+    decimalPlaces = determineIncrements(customIncrement).decimalPlaces;
+} else {
+    const fallback = DEFAULT_CURRENCY_INCREMENTS[currency] || '0.001';
+    ({minIncrement, decimalPlaces} = determineIncrements(fallback));
+}
+```
 
-Add detailed logging for:
-- Complete execution plan before starting
-- Progress updates during sequential execution
-- Rollback information if needed
-
-#### 8. Add Execution Plan Validation
-**File**: `src/functions/manage-loans.ts`
-**Risk**: Low
-**Status**: Pending
-
-Validate execution plan:
-- Check total increases don't exceed available balances
-- Validate currency consistency
-- Risk assessment before execution
-
-### Low Priority Tasks
-
-#### 9. Add Rollback Capability
-**File**: `src/functions/manage-loans.ts`
-**Risk**: Low
-**Status**: Pending
-
-If execution fails partway:
-- Log exactly what succeeded
-- Provide rollback instructions
-- Option to retry failed increases
-
-#### 10. Performance Monitoring
-**File**: `src/functions/manage-loans.ts`
-**Risk**: Low
-**Status**: Pending
-
-Track performance differences:
-- Planning phase duration
-- Sequential execution duration  
-- Compare with current parallel approach
+**After**:
+```typescript
+const incrementValue = input.customMinIncrements?.[currency] 
+    || DEFAULT_CURRENCY_INCREMENTS[currency] 
+    || '0.001';
+({minIncrement, decimalPlaces} = determineIncrements(incrementValue));
+```
 
 ## Implementation Strategy
 
-### Phase 1: Safe Foundations (Low Risk)
-1. Add new data structures to types
-2. Create helper functions for planning
-3. Add comprehensive logging
+### Phase 1: Create Enhanced Utility (Low Risk)
+1. ✅ Add enhanced `determineIncrements` function to `decimal.ts`
+2. ✅ Add proper TypeScript imports for `CurrencyInfo`
+3. ✅ Add JSDoc documentation
 
-### Phase 2: Core Refactoring (Medium Risk)  
-1. Split processSubaccount() function
-2. Create planning phase function
-3. Create sequential execution function
+### Phase 2: Update Imports (Low Risk)
+1. ✅ Add `determineIncrements` to imports in `manage-loans.ts`
+2. ✅ Remove local function definition
 
-### Phase 3: Integration (High Risk)
-1. Update main handler to use new architecture
-2. Extensive testing with dry-run mode
-3. Performance validation
+### Phase 3: Simplify Usage (Medium Risk)
+1. ✅ Replace success path logic with simplified calls
+2. ✅ Replace error path logic with simplified calls
+3. ✅ Test with TypeScript compilation
 
-### Phase 4: Enhancements (Low Risk)
-1. Add prioritization logic
-2. Enhanced error handling and rollback
-3. Performance monitoring
+### Phase 4: Validation (Low Risk)
+1. ✅ Run type check
+2. ✅ Run build
+3. ✅ Run local tests to ensure behavior unchanged
 
 ## Validation Checklist
 
 **After Each Change:**
 - [ ] TypeScript compilation successful
-- [ ] All existing tests pass
-- [ ] Dry-run execution produces same results
-- [ ] No behavioral changes in planning phase
-- [ ] Sequential execution matches current parallel results
-- [ ] Performance acceptable (target: <20% slower)
+- [ ] Function signature matches expected usage
+- [ ] No unused imports or variables
+- [ ] Local function definition removed
 
 **Final Validation:**
-- [ ] All old immediate-processing patterns removed
-- [ ] No broken imports or references
-- [ ] All functions have proper error handling
-- [ ] Complete test coverage for new functionality
-- [ ] Documentation updated
-- [ ] No orphaned code remains
+- [ ] All `determineIncrements` calls use new centralized function
+- [ ] API decimal places take priority when `currencyInfo` available
+- [ ] Fallback decimal place parsing works when no `currencyInfo`
+- [ ] Build passes successfully
+- [ ] Local tests produce same results as before
+- [ ] No behavioral changes in increment determination
 
 ## De-Para Mapping
 
 | Before | After | Status |
 |--------|-------|--------|
-| `processSubaccount()` (immediate) | `planSubaccountIncreases()` + `executeIncrease()` | Pending |
-| Parallel processing + immediate execution | Planning phase → Sequential execution | Pending |
-| Mixed calculation/execution loop | Separate planning and execution phases | Pending |
-| Limited visibility before execution | Complete execution plan upfront | Pending |
-| Error handling during mixed operations | Clean separation: plan validation + execution errors | Pending |
+| Local `determineIncrements` function | Utility function in `decimal.ts` | Pending |
+| `currencyInfo ? currencyInfo.withdrawalDecimalPlaces : determineIncrements(...)` | `determineIncrements(increment, currencyInfo)` | Pending |
+| Multiple conditional blocks for increment logic | Single `determineIncrements` call per case | Pending |
+| Scattered API vs string decimal place logic | Centralized priority logic in function | Pending |
 
 ## Risk Assessment
 
-**High Risk Changes:**
-- Modifying main handler flow
-- Changing from parallel to sequential execution
-- Potential performance impact
+**Low Risk Changes:**
+- Adding utility function to `decimal.ts`
+- Updating imports
+- Simplifying error path logic
+
+**Medium Risk Changes:**
+- Modifying success path logic in `getConfig`
+- Changing conditional structure
 
 **Mitigation Strategies:**
-- Maintain dry-run mode for safe testing
-- Extensive logging for comparison
-- Feature flag capability to revert if needed
-- Performance benchmarking before/after
+- TypeScript compilation catches signature mismatches
+- Local testing validates behavior preservation
+- Incremental changes with validation after each step
 
 **Success Criteria:**
-- Same loan increases calculated as before
-- Better error reporting and recovery
-- Complete execution plan visibility
-- Acceptable performance (target: within 20% of current)
+- Same increment values and decimal places calculated as before
+- Cleaner, more maintainable code
+- Reusable utility function for future use
+- API decimal places consistently take priority over string-derived ones

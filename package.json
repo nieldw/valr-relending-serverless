@@ -6,6 +6,9 @@
   "scripts": {
     "build": "tsc",
     "dev": "netlify dev",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
     "test:local": "tsx scripts/test-local.ts",
     "deploy": "netlify deploy --prod",
     "type-check": "tsc --noEmit"
@@ -16,9 +19,12 @@
   },
   "devDependencies": {
     "@netlify/functions": "^2.4.1",
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.10.5",
     "dotenv": "^16.3.1",
+    "jest": "^30.0.5",
     "netlify-cli": "^17.10.1",
+    "ts-jest": "^29.4.1",
     "tsx": "^4.6.2",
     "typescript": "^5.3.3"
   },

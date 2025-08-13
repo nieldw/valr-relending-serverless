@@ -16,21 +16,6 @@ export interface SubaccountBalance {
   total: string;
 }
 
-export interface LoanOffer {
-  id: string;
-  currency_pair: string;
-  side: 'buy' | 'sell';
-  quantity: string;
-  price: string;
-  order_id: string;
-  fee_currency: string;
-  fee_amount: string;
-  order_status_type: string;
-  order_type: string;
-  created_time: string;
-  updated_time: string;
-}
-
 export interface OpenLoan {
   loanId: string;
   currency: string;
@@ -50,26 +35,15 @@ export interface CurrencyInfo {
   withdrawalDecimalPlaces: number;
 }
 
-export interface CreateLoanOfferRequest {
-  side: 'buy' | 'sell';
-  quantity: string;
-  price: string;
-  pair: string;
-  post_only?: boolean;
-  customer_order_id?: string;
-}
-
-export interface UpdateLoanOfferRequest {
-  quantity?: string;
-  price?: string;
-}
-
 export interface UpdateLoanRequest {
-  totalAmount: string;
+  currencySymbol: string;
+  increaseLoanAmountBy: string;
+  loanId: string;
 }
 
 export interface LoanManagementConfig {
   minIncrementAmount: Record<string, string>;
+  currencyDecimalPlaces: Record<string, number>;
   maxLoanRatio: number;
   dryRun: boolean;
 }

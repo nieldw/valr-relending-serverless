@@ -117,6 +117,23 @@ export class ValrClient {
         
         // Handle responses with data
         if (apiData && apiData.code && typeof apiData.code === 'number') {
+          // Special handling for Bad Request (-11) with validation errors
+          if (apiData.code === -11 && apiData.validationErrors) {
+            const validationSummary = apiData.validationErrors.errors?.map((err: any) => 
+              `${err.field}: ${err.message}`
+            ).join(', ') || 'Unknown validation error';
+            
+            console.error('VALR API Validation Error:', {
+              code: apiData.code,
+              message: apiData.message,
+              validationErrors: validationSummary,
+              endpoint,
+              method,
+              timestamp: new Date().toISOString()
+            });
+            throw new Error(`VALR API Validation Error (${apiData.code}): ${apiData.message} - ${validationSummary}`);
+          }
+          
           throw new Error(`VALR API Error: {"code":${apiData.code},"message":"${apiData.message || 'Unknown error'}"}`);
         }
         
@@ -200,13 +217,11 @@ export class ValrClient {
     return this.makeRequestWithRetry<OpenLoan[]>('GET', `/v1/loans/open${params}`, undefined, subaccountId);
   }
 
-  async updateLoan(
-    subaccountId: string,
-    loanId: string,
-    updateRequest: UpdateLoanRequest
+  async increaseLoan(
+      subaccountId: string,
+      updateRequest: UpdateLoanRequest
   ): Promise<OpenLoan> {
     return this.makeRequestWithRetry<OpenLoan>('PUT', '/v1/loans/increase', {
-      loanId,
       ...updateRequest
     }, subaccountId);
   }
