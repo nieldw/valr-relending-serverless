@@ -1,10 +1,28 @@
+# VALR Relending Serverless
 [![Netlify Status](https://api.netlify.com/api/v1/badges/264ae0e3-7bf4-48de-8501-602b51506e72/deploy-status)](https://app.netlify.com/projects/unique-fenglisu-ccd3df/deploys)
 
-# VALR Relending Serverless
+A production-ready TypeScript serverless function that automatically increases [VALR.com](https://www.valr.com/invite/VARVXA5D) loan offers with any available balance on all subaccounts with active loans. This allows you to effortlessly compound any interest earned by lending on [VALR.com](https://www.valr.com/invite/VARVXA5D).
+
+## 🚀 Quick Start
+
+### Deploy to Netlify (Recommended)
 
 [![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/nieldw/valr-relending-serverless)
 
-A production-ready TypeScript serverless function that automatically increases [VALR.com](https://www.valr.com/invite/VARVXA5D) loan offers with any available balance on all subaccounts with active loans.
+1. Click the deploy button above
+2. Connect your GitHub account
+3. Configure environment variables in Netlify dashboard
+   1. `VALR_API_KEY` and `VALR_API_SECRET` are required
+   2. Mark the API key and secret as _secrets_
+   3. For other configuration options, see the **[⚙️ Configuration Reference](TECHNICAL.md#configuration-reference)** 
+4. Your function will be deployed and ready to use!
+
+### Getting VALR API Credentials
+
+1. Log into your [VALR account](https://www.valr.com)
+2. Go to **Settings** → **API**
+3. Create a new API key with **trading permissions** ONLY
+4. Copy the API key and secret to your environment variables
 
 ## 🚀 Features
 
@@ -16,24 +34,6 @@ A production-ready TypeScript serverless function that automatically increases [
 - 🧪 **Dry Run Mode**: Safe testing without making actual transactions
 - ⚙️ **Configurable**: Customizable increments, ratios, and safety controls
 - ⏰ **Scheduled Execution**: Automatic execution via Netlify
-
-## 🚀 Quick Start
-
-### Deploy to Netlify (Recommended)
-
-[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/nieldw/valr-relending-serverless)
-
-1. Click the deploy button above
-2. Connect your GitHub account
-3. Configure environment variables in Netlify dashboard
-4. Your function will be deployed and ready to use!
-
-### Getting VALR API Credentials
-
-1. Log into your [VALR account](https://www.valr.com)
-2. Go to **Settings** → **API**
-3. Create a new API key with **trading permissions** ONLY
-4. Copy the API key and secret to your environment variables
 
 ## 📚 Documentation
 
