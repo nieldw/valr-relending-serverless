@@ -1,3 +1,5 @@
+[![Netlify Status](https://api.netlify.com/api/v1/badges/264ae0e3-7bf4-48de-8501-602b51506e72/deploy-status)](https://app.netlify.com/projects/unique-fenglisu-ccd3df/deploys)
+
 # VALR Relending Serverless
 
 [![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/nieldw/valr-relending-serverless)
