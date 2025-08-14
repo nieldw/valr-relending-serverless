@@ -1,33 +1,27 @@
 {
-  "sessionId": "refactor_2025_08_13_config_extraction",
-  "startTime": "2025-08-13T15:45:00.000Z",
-  "endTime": "2025-08-13T16:30:00.000Z",
-  "goal": "Extract configuration into a separate, centralized file for better maintainability and organization",
+  "sessionId": "refactor_2025_08_13_readme_restructure",
+  "startTime": "2025-08-13T16:45:00.000Z",
+  "endTime": "2025-08-13T17:15:00.000Z",
+  "goal": "Move technical details from README.md to separate documentation file and create clean, user-focused README",
   "currentPhase": "completed", 
   "completedTasks": [
-    "Create simple config.ts file with centralized environment variable handling",
-    "Add DEFAULT_FALLBACK_INCREMENT constant to replace magic number '0.001'",
-    "Update manage-loans.ts to use getConfig() instead of getConfigInput()",
-    "Remove getConfigInput() function and LoanManagementConfigInput import",
-    "Move getCredentials() function to config module",
-    "Move getConfig() function to config module as getLoanManagementConfig()",
-    "Update all function calls to use centralized config module",
-    "Clean up unused imports and remove duplicate code",
-    "Add comprehensive JSDoc documentation to config functions"
+    "Create TECHNICAL.md file with detailed documentation",
+    "Simplify README.md to user-focused content",
+    "Add cross-references between documentation files",
+    "Validate documentation structure and links"
   ],
   "currentTask": null,
   "totalTasks": 4,
   "completedCount": 4,
   "riskLevel": "low",
-  "lastCheckpoint": "2025-08-13T16:30:00.000Z",
+  "lastCheckpoint": "2025-08-13T17:15:00.000Z",
   "architecture": {
-    "current": "fully_centralized_config_with_exported_functions",
-    "previous": "scattered_config_across_files"
+    "current": "clean_readme_plus_technical_docs",
+    "previous": "single_comprehensive_readme"
   },
   "filesModified": [
-    "src/config.ts",
-    "src/constants/currency-defaults.ts",
-    "src/functions/manage-loans.ts"
+    "README.md",
+    "TECHNICAL.md"
   ],
   "backupCreated": false,
   "validationPassed": true,

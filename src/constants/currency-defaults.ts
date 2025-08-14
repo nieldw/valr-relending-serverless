@@ -32,5 +32,4 @@ export const MAIN_ACCOUNT_ID = '0';
  * Default configuration values
  */
 export const DEFAULT_MAX_LOAN_RATIO = 1.0;
-export const DEFAULT_DRY_RUN = false;
 export const DEFAULT_FALLBACK_INCREMENT = '0.001';
