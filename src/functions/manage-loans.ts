@@ -3,7 +3,7 @@ import {ValrClient} from '../utils/valr-client';
 import {Logger, LogLevel} from '../utils/logger';
 import {calculateIncrease, parseFinancialAmount} from '../utils/decimal';
 import {validateAllEnvironmentVariables} from '../utils/validation';
-import {getLoanManagementConfig, getCredentials} from '../config';
+import {getCredentials, getLoanManagementConfig} from '../config';
 import {
     ExecutionResult,
     ExecutionSummary,
