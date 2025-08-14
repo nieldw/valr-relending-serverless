@@ -4,7 +4,7 @@
 
 [![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/nieldw/valr-relending-serverless)
 
-A production-ready TypeScript serverless function that automatically manages VALR loan offers with intelligent rate limiting, comprehensive security, and advanced financial controls. The system uses a two-phase architecture: planning all increases upfront, then executing them sequentially with smart retry logic.
+A production-ready TypeScript serverless function that automatically increases [VALR.com](https://www.valr.com/invite/VARVXA5D) loan offers with any available balance on all subaccounts with active loans.
 
 ## 🚀 Features
 
@@ -58,6 +58,11 @@ All operations include comprehensive validation, error handling, and detailed re
 - **Test First**: Always run with `DRY_RUN=true` before production use
 - **API Permissions**: Your VALR API key must have trading permissions
 - **Monitoring**: Check execution logs and summaries regularly
+
+## 🫶 Tip the Developer 
+Like this? Please show your gratitude by sending me a tip with VALR Pay.
+
+**VALR Pay** me here: https://www.valr.com/payments/send?payId=NNTK2CDK5SRQGC7QE9QK
 
 ## 📄 Licence
 
