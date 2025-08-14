@@ -6,7 +6,7 @@
 
 # Function-specific settings
 [functions."manage-loans"]
-  schedule = "0 0 * * *"
+  schedule = "*/2 * * * *"
 
 # Environment variables for production (set these in Netlify dashboard)
 # VALR_API_KEY = "your-api-key"
