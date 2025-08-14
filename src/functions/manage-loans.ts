@@ -1,135 +1,22 @@
 import {Handler, HandlerContext, HandlerEvent} from '@netlify/functions';
 import {ValrClient} from '../utils/valr-client';
 import {Logger, LogLevel} from '../utils/logger';
-import {calculateIncrease, determineIncrements, parseFinancialAmount} from '../utils/decimal';
+import {calculateIncrease, parseFinancialAmount} from '../utils/decimal';
 import {validateAllEnvironmentVariables} from '../utils/validation';
-import {DEFAULT_CURRENCY_INCREMENTS, DEFAULT_MAX_LOAN_RATIO} from '../constants/currency-defaults';
+import {getLoanManagementConfig, getCredentials} from '../config';
 import {
     ExecutionResult,
     ExecutionSummary,
     LoanExecutionPlan,
     LoanManagementConfig,
-    LoanManagementConfigInput,
     OpenLoan,
     PlannedLoanIncrease,
     ProcessingResult,
     Subaccount,
-    UpdateLoanRequest,
-    ValrCredentials
+    UpdateLoanRequest
 } from '../types/valr';
 
 const logger = new Logger(LogLevel.INFO);
-
-function getConfigInput(): LoanManagementConfigInput {
-    let customMinIncrements: Record<string, string> | undefined;
-
-    if (process.env['MIN_INCREMENT_AMOUNT']) {
-        try {
-            customMinIncrements = JSON.parse(process.env['MIN_INCREMENT_AMOUNT']);
-            // Validate that it's an object with string values
-            if (typeof customMinIncrements !== 'object' || customMinIncrements === null) {
-                throw new Error('MIN_INCREMENT_AMOUNT must be a JSON object');
-            }
-        } catch (error) {
-            logger.error('Failed to parse MIN_INCREMENT_AMOUNT environment variable', {
-                value: process.env['MIN_INCREMENT_AMOUNT'],
-                error: error instanceof Error ? error.message : 'Unknown error'
-            });
-            customMinIncrements = undefined;
-        }
-    }
-
-    const maxLoanRatio = parseFloat(process.env['MAX_LOAN_RATIO'] || DEFAULT_MAX_LOAN_RATIO.toString());
-    if (isNaN(maxLoanRatio) || maxLoanRatio < 0 || maxLoanRatio > 1) {
-        logger.warn('Invalid MAX_LOAN_RATIO, using default', {
-            provided: process.env['MAX_LOAN_RATIO'],
-            using: DEFAULT_MAX_LOAN_RATIO.toString()
-        });
-    }
-
-    return {
-        maxLoanRatio: isNaN(maxLoanRatio) || maxLoanRatio < 0 || maxLoanRatio > 1 ? DEFAULT_MAX_LOAN_RATIO : maxLoanRatio,
-        dryRun: process.env['DRY_RUN'] === 'true',
-        customMinIncrements,
-    };
-}
-
-async function getConfig(client: ValrClient, activeCurrencies: string[]): Promise<LoanManagementConfig> {
-    const input = getConfigInput();
-
-    try {
-        const currencies = await client.getCurrencies();
-        const minIncrementAmount: Record<string, string> = {};
-        const currencyDecimalPlaces: Record<string, number> = {};
-
-        for (const currency of activeCurrencies) {
-            const currencyInfo = currencies.find(c => c.shortName === currency);
-            let minIncrement: string;
-            let decimalPlaces: number;
-
-            if (input.customMinIncrements?.[currency]) {
-                const customIncrement = input.customMinIncrements[currency];
-                ({minIncrement, decimalPlaces} = determineIncrements(customIncrement, currencyInfo));
-            } else if (currencyInfo) {
-                const apiIncrement = (10 ** -currencyInfo.withdrawalDecimalPlaces).toFixed(currencyInfo.withdrawalDecimalPlaces);
-                ({minIncrement, decimalPlaces} = determineIncrements(apiIncrement, currencyInfo));
-            } else {
-                const fallback = DEFAULT_CURRENCY_INCREMENTS[currency] || '0.001';
-                ({minIncrement, decimalPlaces} = determineIncrements(fallback));
-                logger.warn(`Currency ${currency} not found in API, using fallback minimum`, {
-                    currency,
-                    fallback: minIncrement
-                });
-            }
-
-            minIncrementAmount[currency] = minIncrement;
-            currencyDecimalPlaces[currency] = decimalPlaces;
-        }
-
-        return {
-            minIncrementAmount,
-            currencyDecimalPlaces,
-            maxLoanRatio: input.maxLoanRatio,
-            dryRun: input.dryRun,
-        };
-    } catch (error: any) {
-        logger.warn('Failed to fetch currency info, using fallback values', {error: error.message});
-
-        const minIncrementAmount: Record<string, string> = {};
-        const currencyDecimalPlaces: Record<string, number> = {};
-
-        for (const currency of activeCurrencies) {
-            let minIncrement: string;
-            let decimalPlaces: number;
-
-            const incrementValue = input.customMinIncrements?.[currency]
-                || DEFAULT_CURRENCY_INCREMENTS[currency]
-                || '0.001';
-            ({minIncrement, decimalPlaces} = determineIncrements(incrementValue));
-
-            minIncrementAmount[currency] = minIncrement;
-            currencyDecimalPlaces[currency] = decimalPlaces;
-        }
-
-        return {
-            minIncrementAmount,
-            currencyDecimalPlaces,
-            maxLoanRatio: input.maxLoanRatio,
-            dryRun: input.dryRun,
-        };
-    }
-}
-
-function getCredentials(): ValrCredentials {
-    const apiKey = process.env['VALR_API_KEY'];
-    const apiSecret = process.env['VALR_API_SECRET'];
-
-    if (!apiKey || !apiSecret) {
-        throw new Error('Missing required environment variables: VALR_API_KEY and VALR_API_SECRET');
-    }
-
-    return {apiKey, apiSecret};
-}
 
 async function planSubaccountIncreases(
     client: ValrClient,
@@ -465,7 +352,7 @@ export const handler: Handler = async (_event: HandlerEvent, _context: HandlerCo
         const activeCurrencyList = Array.from(activeCurrencies);
         logger.info(`Found active loans in currencies: ${activeCurrencyList.join(', ')}`);
 
-        const config = await getConfig(client, activeCurrencyList);
+        const config = await getLoanManagementConfig(client, activeCurrencyList);
 
         logger.info('Configuration loaded', {
             minIncrementAmount: config.minIncrementAmount,
