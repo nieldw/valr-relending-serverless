@@ -33,3 +33,8 @@ export const MAIN_ACCOUNT_ID = '0';
  */
 export const DEFAULT_MAX_LOAN_RATIO = 1.0;
 export const DEFAULT_FALLBACK_INCREMENT = '0.001';
+
+/**
+ * Global maximum number of decimal places for loan increases
+ */
+export const MAX_LOAN_INCREASE_DECIMAL_PLACES = 4;

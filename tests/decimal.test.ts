@@ -5,6 +5,7 @@
 
 import { determineIncrements } from '../src/utils/decimal';
 import { CurrencyInfo } from '../src/types/valr';
+import { MAX_LOAN_INCREASE_DECIMAL_PLACES } from '../src/constants/currency-defaults';
 
 // Mock CurrencyInfo objects for testing
 const mockZAR: CurrencyInfo = {
@@ -252,6 +253,18 @@ describe('determineIncrements', () => {
       };
       const result = determineIncrements('0.01', mockHighPrecision);
       expect(result.decimalPlaces).toBe(18); // API says 18
+    });
+  });
+
+  describe('Global maximum decimal places constant', () => {
+    test('should have MAX_LOAN_INCREASE_DECIMAL_PLACES set to 4', () => {
+      expect(MAX_LOAN_INCREASE_DECIMAL_PLACES).toBe(4);
+    });
+
+    test('should ensure global maximum is reasonable for financial calculations', () => {
+      // Verify the constant is within reasonable bounds for financial applications
+      expect(MAX_LOAN_INCREASE_DECIMAL_PLACES).toBeGreaterThanOrEqual(2);
+      expect(MAX_LOAN_INCREASE_DECIMAL_PLACES).toBeLessThanOrEqual(8);
     });
   });
 });

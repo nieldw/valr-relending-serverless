@@ -4,6 +4,7 @@ import {Logger, LogLevel} from '../utils/logger';
 import {calculateIncrease, parseFinancialAmount} from '../utils/decimal';
 import {validateAllEnvironmentVariables} from '../utils/validation';
 import {getCredentials, getLoanManagementConfig} from '../config';
+import {MAX_LOAN_INCREASE_DECIMAL_PLACES} from '../constants/currency-defaults';
 import {
     ExecutionResult,
     ExecutionSummary,
@@ -68,7 +69,9 @@ async function planSubaccountIncreases(
                 }
 
                 // Truncate increase amount to currency's decimal places for API compliance
-                const decimalPlaces = config.currencyDecimalPlaces[currency] || 8;
+                // Apply global maximum of 4 decimal places for loan increases
+                const configuredDecimalPlaces = config.currencyDecimalPlaces[currency] || 8;
+                const decimalPlaces = Math.min(configuredDecimalPlaces, MAX_LOAN_INCREASE_DECIMAL_PLACES);
                 const truncatedIncrease = actualIncrease.truncateToDecimalPlaces(decimalPlaces);
                 const truncatedIncreaseAmount = truncatedIncrease.toString();
 
