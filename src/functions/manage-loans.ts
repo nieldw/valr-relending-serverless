@@ -63,11 +63,6 @@ async function planSubaccountIncreases(
 
                 const actualIncrease = calculateIncrease(loan.totalAmount, availableAmountStr, config.maxLoanRatio);
 
-                if (actualIncrease.isLessThan(minIncrement)) {
-                    logger.debug(`Increase amount too small for ${currency}: ${actualIncrease.toString()} < ${minIncrement.toString()}`);
-                    continue;
-                }
-
                 // Truncate increase amount to currency's decimal places for API compliance
                 // Apply global maximum of 4 decimal places for loan increases
                 const configuredDecimalPlaces = config.currencyDecimalPlaces[currency] || 8;
@@ -76,6 +71,11 @@ async function planSubaccountIncreases(
                 const truncatedIncreaseAmount = truncatedIncrease.toString();
 
                 const newQuantity = currentQuantity.add(truncatedIncrease);
+
+                if (truncatedIncrease.isLessThan(minIncrement)) {
+                    logger.debug(`Increase amount too small for ${currency}: ${truncatedIncreaseAmount} < ${minIncrement.toString()}`);
+                    continue;
+                }
 
                 const plannedIncrease: PlannedLoanIncrease = {
                     subaccountId: subaccount.id,
